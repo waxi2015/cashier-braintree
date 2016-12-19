@@ -1,6 +1,6 @@
 <?php
 
-namespace Laravel\Cashier;
+namespace Waxis\Cashier;
 
 use DOMPDF;
 use Carbon\Carbon;

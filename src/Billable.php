@@ -1,6 +1,6 @@
 <?php
 
-namespace Laravel\Cashier;
+namespace Waxis\Cashier;
 
 use Exception;
 use Carbon\Carbon;
@@ -66,7 +66,7 @@ trait Billable
      *
      * @param  string  $subscription
      * @param  string  $plan
-     * @return \Laravel\Cashier\SubscriptionBuilder
+     * @return \Waxis\Cashier\SubscriptionBuilder
      */
     public function newSubscription($subscription, $plan)
     {
@@ -133,7 +133,7 @@ trait Billable
      * Get a subscription instance by name.
      *
      * @param  string  $subscription
-     * @return \Laravel\Cashier\Subscription|null
+     * @return \Waxis\Cashier\Subscription|null
      */
     public function subscription($subscription = 'default')
     {
@@ -159,7 +159,7 @@ trait Billable
      * Find an invoice by ID.
      *
      * @param  string  $id
-     * @return \Laravel\Cashier\Invoice|null
+     * @return \Waxis\Cashier\Invoice|null
      */
     public function findInvoice($id)
     {
@@ -180,7 +180,7 @@ trait Billable
      * Find an invoice or throw a 404 error.
      *
      * @param  string  $id
-     * @return \Laravel\Cashier\Invoice
+     * @return \Waxis\Cashier\Invoice
      */
     public function findInvoiceOrFail($id)
     {

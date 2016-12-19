@@ -1,6 +1,6 @@
 <?php
 
-namespace Laravel\Cashier;
+namespace Waxis\Cashier;
 
 use Exception;
 use Carbon\Carbon;
@@ -109,7 +109,7 @@ class SubscriptionBuilder
      * Add a new Braintree subscription to the model.
      *
      * @param array $options
-     * @return \Laravel\Cashier\Subscription
+     * @return \Waxis\Cashier\Subscription
      */
     public function add(array $options = [])
     {
@@ -122,7 +122,7 @@ class SubscriptionBuilder
      * @param  string|null  $token
      * @param  array  $customerOptions
      * @param  array  $subscriptionOptions
-     * @return \Laravel\Cashier\Subscription
+     * @return \Waxis\Cashier\Subscription
      */
     public function create($token = null,
                            array $customerOptions = [],

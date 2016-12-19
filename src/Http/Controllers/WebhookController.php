@@ -1,10 +1,10 @@
 <?php
 
-namespace Laravel\Cashier\Http\Controllers;
+namespace Waxis\Cashier\Http\Controllers;
 
 use Exception;
 use Illuminate\Http\Request;
-use Laravel\Cashier\Subscription;
+use Waxis\Cashier\Subscription;
 use Illuminate\Routing\Controller;
 use Braintree\WebhookNotification;
 use Symfony\Component\HttpFoundation\Response;
