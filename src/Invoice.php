@@ -11,11 +11,11 @@ use Braintree\Transaction as BraintreeTransaction;
 class Invoice
 {
     /**
-     * The model instance.
+     * The user instance.
      *
      * @var \Illuminate\Database\Eloquent\Model
      */
-    protected $owner;
+    protected $user;
 
     /**
      * The Braintree transaction instance.
@@ -27,13 +27,13 @@ class Invoice
     /**
      * Create a new invoice instance.
      *
-     * @param  \Illuminate\Database\Eloquent\Model  $owner
+     * @param  \Illuminate\Database\Eloquent\Model  $user
      * @param  \Braintree\Transaction  $transaction
      * @return void
      */
-    public function __construct($owner, BraintreeTransaction $transaction)
+    public function __construct($user, BraintreeTransaction $transaction)
     {
-        $this->owner = $owner;
+        $this->user = $user;
         $this->transaction = $transaction;
     }
 
@@ -213,10 +213,14 @@ class Invoice
      * @param  array  $data
      * @return \Illuminate\View\View
      */
-    public function view(array $data)
+    public function view(array $data, $view = null)
     {
-        return View::make('cashier::receipt', array_merge(
-            $data, ['invoice' => $this, 'owner' => $this->owner, 'user' => $this->owner]
+        if (is_null($view)) {
+            $view = 'cashier::receipt';
+        }
+        
+        return View::make($view, array_merge(
+            $data, ['invoice' => $this, 'user' => $this->user]
         ));
     }
 
@@ -226,7 +230,7 @@ class Invoice
      * @param  array  $data
      * @return string
      */
-    public function pdf(array $data)
+    public function pdf(array $data, $view = null)
     {
         if (! defined('DOMPDF_ENABLE_AUTOLOAD')) {
             define('DOMPDF_ENABLE_AUTOLOAD', false);
@@ -237,8 +241,8 @@ class Invoice
         }
 
         $dompdf = new DOMPDF;
-
-        $dompdf->load_html($this->view($data)->render());
+        
+        $dompdf->load_html($this->view($data, $view)->render());
 
         $dompdf->render();
 
@@ -251,16 +255,58 @@ class Invoice
      * @param  array   $data
      * @return \Symfony\Component\HttpFoundation\Response
      */
-    public function download(array $data)
+    public function download(array $data, $view = null)
     {
         $filename = $data['product'].'_'.$this->date()->month.'_'.$this->date()->year.'.pdf';
 
-        return new Response($this->pdf($data), 200, [
+        return new Response($this->pdf($data, $view), 200, [
             'Content-Description' => 'File Transfer',
             'Content-Disposition' => 'attachment; filename="'.$filename.'"',
             'Content-Transfer-Encoding' => 'binary',
             'Content-Type' => 'application/pdf',
         ]);
+    }
+
+    /**
+     * Returns user.
+     *
+     * @return \Illuminate\Database\Eloquent\Model
+     */
+    public function user()
+    {
+        return $this->user;
+    }
+
+    /**
+     * Returns VAT percentage.
+     *
+     * @return int
+     */
+    public function vatPercentage()
+    {
+        return $this->user->taxPercentage();
+    }
+
+    /**
+     * Returns VAT.
+     *
+     * @return int
+     */
+    public function vat()
+    {
+        return $this->net() * 0.27;
+    }
+
+    /**
+     * Returns net amount.
+     *
+     * @return int
+     */
+    public function net()
+    {
+        $total = $this->rawTotal();
+
+        return $total / (1 + ($this->user->taxPercentage() / 100));
     }
 
     /**
