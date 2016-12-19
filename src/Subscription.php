@@ -29,30 +29,16 @@ class Subscription extends Model
     ];
 
     /**
-     * Indicates plan changes should be prorated.
-     *
-     * @var bool
-     */
-    protected $prorate = true;
-
-    /**
      * Get the user that owns the subscription.
      */
     public function user()
     {
-        return $this->owner();
-    }
+        $model = getenv('BRAINTREE_MODEL') ?: config('services.braintree.model');
 
-    /**
-     * Get the model related to the subscription.
-     */
-    public function owner()
-    {
-        $model = getenv('BRAINTREE_MODEL') ?: config('services.braintree.model', 'App\\User');
+        $modelParts = explode('\\', $model);
+        end($modelParts);
 
-        $model = new $model;
-
-        return $this->belongsTo(get_class($model), $model->getForeignKey());
+        return $this->belongsTo($model, strtolower($modelParts[key($modelParts)]) . '_id');
     }
 
     /**
@@ -66,7 +52,7 @@ class Subscription extends Model
     }
 
     /**
-     * Determine if the subscription is active.
+     * Determine if the subscrition is active.
      *
      * @return bool
      */
@@ -126,13 +112,13 @@ class Subscription extends Model
         }
 
         if (! $this->active()) {
-            return $this->owner->newSubscription($this->name, $plan)
+            return $this->user->newSubscription($this->name, $plan)
                                 ->skipTrial()->create();
         }
 
         $plan = BraintreeService::findPlan($plan);
 
-        if ($this->wouldChangeBillingFrequency($plan) && $this->prorate) {
+        if ($this->wouldChangeBillingFrequency($plan)) {
             return $this->swapAcrossFrequencies($plan);
         }
 
@@ -140,11 +126,11 @@ class Subscription extends Model
 
         $response = BraintreeSubscription::update($subscription->id, [
             'planId' => $plan->id,
-            'price' => $plan->price * (1 + ($this->owner->taxPercentage() / 100)),
+            'price' => $plan->price * (1 + ($this->user->taxPercentage() / 100)),
             'neverExpires' => true,
             'numberOfBillingCycles' => null,
             'options' => [
-                'prorateCharges' => $this->prorate,
+                'prorateCharges' => true,
             ],
         ]);
 
@@ -185,7 +171,7 @@ class Subscription extends Model
 
         $discount = $this->switchingToMonthlyPlan($currentPlan, $plan)
                                 ? $this->getDiscountForSwitchToMonthly($currentPlan, $plan)
-                                : $this->getDiscountForSwitchToYearly();
+                                : $this->getDiscountForSwitchToYearly($currentPlan);
 
         $options = [];
 
@@ -201,7 +187,7 @@ class Subscription extends Model
 
         $this->cancelNow();
 
-        return $this->owner->newSubscription($this->name, $plan->id)
+        return $this->user->newSubscription($this->name, $plan->id)
                             ->skipTrial()->create(null, [], $options);
     }
 
@@ -242,9 +228,38 @@ class Subscription extends Model
      */
     protected function moneyRemainingOnYearlyPlan($plan)
     {
-        return ($plan->price / 365) * Carbon::today()->diffInDays(Carbon::instance(
-            $this->asBraintreeSubscription()->billingPeriodEndDate
-        ), false);
+        $billingPeriodEndDate = $this->asBraintreeSubscription()->billingPeriodEndDate;
+
+        $amount = 0;
+        if ($billingPeriodEndDate instanceof Carbon) {
+            $amount = ($plan->price / 365) * Carbon::today()->diffInDays(Carbon::instance(
+                $billingPeriodEndDate
+            ), false);
+        }
+
+        return $amount;
+    }
+
+    /**
+     * Calculate the amount of discount to apply to a swap to year billing.
+     *
+     * @param  BraintreePlan  $plan
+     * @return float
+     */
+    protected function moneyRemainingOnMonthlyPlan($plan)
+    {
+        $billingPeriodEndDate = $this->asBraintreeSubscription()->billingPeriodEndDate;
+
+        $amount = 0;
+        if (!$billingPeriodEndDate instanceof Carbon) {
+            $billingPeriodEndDate = Carbon::instance(
+                $billingPeriodEndDate
+            );
+        }
+        
+        $amount = ($plan->price / 30) * Carbon::today()->diffInDays($billingPeriodEndDate, false);
+
+        return $amount;
     }
 
     /**
@@ -252,13 +267,12 @@ class Subscription extends Model
      *
      * @return object
      */
-    protected function getDiscountForSwitchToYearly()
+    protected function getDiscountForSwitchToYearly($currentPlan)
     {
         $amount = 0;
-
         foreach ($this->asBraintreeSubscription()->discounts as $discount) {
             if ($discount->id == 'plan-credit') {
-                $amount += (float) $discount->amount * $discount->numberOfBillingCycles;
+                $amount += (float) $this->moneyRemainingOnMonthlyPlan($currentPlan) * (1 + $this->user->taxPercentage());
             }
         }
 
@@ -304,7 +318,7 @@ class Subscription extends Model
     }
 
     /**
-     * Cancel the subscription.
+     * Cacnel the subscription.
      *
      * @return $this
      */
@@ -377,18 +391,6 @@ class Subscription extends Model
         ]);
 
         $this->fill(['ends_at' => null])->save();
-
-        return $this;
-    }
-
-    /**
-     * Indicate that plan changes should not be prorated.
-     *
-     * @return $this
-     */
-    public function noProrate()
-    {
-        $this->prorate = false;
 
         return $this;
     }

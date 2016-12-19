@@ -6,7 +6,7 @@ use Exception;
 use Carbon\Carbon;
 use Illuminate\Support\Arr;
 use Braintree\PaymentMethod;
-use Braintree\PayPalAccount;
+use Braintree\PaypalAccount;
 use InvalidArgumentException;
 use Braintree\TransactionSearch;
 use Illuminate\Support\Collection;
@@ -52,26 +52,13 @@ trait Billable
      * @param  array  $options
      * @return \Braintree\Transaction
      */
-    public function tab($description, $amount, array $options = [])
+    public function invoiceFor($description, $amount, array $options = [])
     {
         return $this->charge($amount, array_merge($options, [
             'customFields' => [
                 'description' => $description,
             ],
         ]));
-    }
-
-    /**
-     * Invoice the customer for the given amount (alias).
-     *
-     * @param  string  $description
-     * @param  int  $amount
-     * @param  array  $options
-     * @return \Braintree\Transaction
-     */
-    public function invoiceFor($description, $amount, array $options = [])
-    {
-        return $this->tab($description, $amount, $options);
     }
 
     /**
@@ -87,7 +74,7 @@ trait Billable
     }
 
     /**
-     * Determine if the model is on trial.
+     * Determine if the user is on trial.
      *
      * @param  string  $subscription
      * @param  string|null  $plan
@@ -110,7 +97,7 @@ trait Billable
     }
 
     /**
-     * Determine if the model is on a "generic" trial at the user level.
+     * Determine if the user is on a "generic" trial at the user level.
      *
      * @return bool
      */
@@ -120,7 +107,7 @@ trait Billable
     }
 
     /**
-     * Determine if the model has a given subscription.
+     * Determine if the user has a given subscription.
      *
      * @param  string  $subscription
      * @param  string|null  $plan
@@ -153,13 +140,13 @@ trait Billable
         return $this->subscriptions->sortByDesc(function ($value) {
             return $value->created_at->getTimestamp();
         })
-        ->first(function ($value) use ($subscription) {
+        ->first(function ($key, $value) use ($subscription) {
             return $value->name === $subscription;
         });
     }
 
     /**
-     * Get all of the subscriptions for the model.
+     * Get all of the subscriptions for the user.
      *
      * @return \Illuminate\Database\Eloquent\Collection
      */
@@ -211,12 +198,12 @@ trait Billable
      *
      * @param  string  $id
      * @param  array   $data
-     * @param  string  $storagePath
+     * @param  string  $view
      * @return \Symfony\Component\HttpFoundation\Response
      */
-    public function downloadInvoice($id, array $data, $storagePath = null)
+    public function downloadInvoice($id, array $data, $view = null)
     {
-        return $this->findInvoiceOrFail($id)->download($data, $storagePath);
+        return $this->findInvoiceOrFail($id)->download($data, $view);
     }
 
     /**
@@ -233,10 +220,10 @@ trait Billable
         $customer = $this->asBraintreeCustomer();
 
         $parameters = array_merge([
-            'id' => TransactionSearch::customerId()->is($customer->id),
-            'range' => TransactionSearch::createdAt()->between(
-                Carbon::today()->subYears(2)->format('m/d/Y H:i'),
-                Carbon::tomorrow()->format('m/d/Y H:i')
+            TransactionSearch::customerId()->is($customer->id),
+            TransactionSearch::createdAt()->between(
+                Carbon::today()->subYears(2)->format('m/d/Y H:s'),
+                Carbon::tomorrow()->format('m/d/Y H:s')
             ),
         ], $parameters);
 
@@ -271,23 +258,20 @@ trait Billable
      * Update customer's credit card.
      *
      * @param  string  $token
-     * @param  array  $options
      * @return void
      */
-    public function updateCard($token, array $options = [])
+    public function updateCard($token, $options = [])
     {
         $customer = $this->asBraintreeCustomer();
 
-        $response = PaymentMethod::create(
-            array_replace_recursive([
-                'customerId' => $customer->id,
-                'paymentMethodNonce' => $token,
-                'options' => [
-                    'makeDefault' => true,
-                    'verifyCard' => true,
-                ],
-            ], $options)
-        );
+        $response = PaymentMethod::create(array_merge([
+            'customerId' => $customer->id,
+            'paymentMethodNonce' => $token,
+            'options' => [
+                'makeDefault' => true,
+                'verifyCard' => true,
+            ],
+        ], $options));
 
         if (! $response->success) {
             throw new Exception('Braintree was unable to create a payment method: '.$response->message);
@@ -307,7 +291,60 @@ trait Billable
     }
 
     /**
-     * Update the payment method token for all of the model's subscriptions.
+     * Update customer details.
+     *
+     * @param  array  $options
+     * @return void
+     */
+    public function updateCustomer($options = [])
+    {
+        if (empty($options)) {
+            return;
+        }
+
+        $response = BraintreeCustomer::update($this->braintree_id, $options);
+
+        if (! $response->success) {
+            throw new Exception('Braintree was unable to update customer: '.$response->message);
+        }
+    }
+
+    /**
+     * Update payment method.
+     *
+     * @param  string  $token
+     * @param  array  $options
+     * @return void
+     */
+    public function updatePaymentMethod($token, $options = [])
+    {
+        $response = PaymentMethod::update($token, $options);
+
+        if (! $response->success) {
+            throw new Exception('Braintree was unable to update payment method: '.$response->message);
+        }
+    }
+
+    /**
+     * Return the default payment method.
+     *
+     * @param  string  $token
+     * @param  array  $options
+     * @return void
+     */
+    public function defaultPaymentMethod()
+    {
+        $customer = $this->asBraintreeCustomer();
+
+        foreach ($customer->creditCards as $creditCard) {
+            if ($creditCard->default === true) {
+                return $creditCard;
+            }
+        }
+    }
+
+    /**
+     * Update the payment method token for all of the user's subscriptions.
      *
      * @param  string  $token
      * @return void
@@ -343,7 +380,7 @@ trait Billable
     }
 
     /**
-     * Determine if the model is actively subscribed to one of the given plans.
+     * Determine if the user is actively subscribed to one of the given plans.
      *
      * @param  array|string  $plans
      * @param  string  $subscription
@@ -374,13 +411,13 @@ trait Billable
      */
     public function onPlan($plan)
     {
-        return ! is_null($this->subscriptions->first(function ($value) use ($plan) {
+        return ! is_null($this->subscriptions->first(function ($key, $value) use ($plan) {
             return $value->braintree_plan === $plan;
         }));
     }
 
     /**
-     * Create a Braintree customer for the given model.
+     * Create a Braintree customer for the given user.
      *
      * @param  string  $token
      * @param  array  $options
@@ -408,7 +445,7 @@ trait Billable
 
         $paymentMethod = $response->customer->paymentMethods[0];
 
-        $paypalAccount = $paymentMethod instanceof PayPalAccount;
+        $paypalAccount = $paymentMethod instanceof PaypalAccount;
 
         $this->forceFill([
             'braintree_id' => $response->customer->id,
@@ -431,7 +468,7 @@ trait Billable
     }
 
     /**
-     * Get the Braintree customer for the model.
+     * Get the Braintree customer for the user.
      *
      * @return \Braintree\Customer
      */
