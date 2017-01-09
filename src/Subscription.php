@@ -105,7 +105,7 @@ class Subscription extends Model
      * @param  string  $plan
      * @return $this
      */
-    public function swap($plan)
+    public function swap($plan, $callback = null)
     {
         if ($this->onGracePeriod() && $this->braintree_plan === $plan) {
             return $this->resume();
@@ -119,12 +119,12 @@ class Subscription extends Model
         $plan = BraintreeService::findPlan($plan);
 
         if ($this->wouldChangeBillingFrequency($plan)) {
-            return $this->swapAcrossFrequencies($plan);
+            return $this->swapAcrossFrequencies($plan, $callback);
         }
 
         $subscription = $this->asBraintreeSubscription();
 
-        $response = BraintreeSubscription::update($subscription->id, [
+        $newSubscriptionData = [
             'planId' => $plan->id,
             'price' => $plan->price * (1 + ($this->user->taxPercentage() / 100)),
             'neverExpires' => true,
@@ -132,7 +132,13 @@ class Subscription extends Model
             'options' => [
                 'prorateCharges' => true,
             ],
-        ]);
+        ];
+
+        if ($callback !== null) {
+            $callback($newSubscriptionData);
+        }
+
+        $response = BraintreeSubscription::update($subscription->id, $newSubscriptionData);
 
         if ($response->success) {
             $this->fill([
@@ -165,7 +171,7 @@ class Subscription extends Model
      * @param  string  $plan
      * @return $this
      */
-    protected function swapAcrossFrequencies($plan)
+    protected function swapAcrossFrequencies($plan, $callback = null)
     {
         $currentPlan = BraintreeService::findPlan($this->braintree_plan);
 
@@ -186,6 +192,10 @@ class Subscription extends Model
         }
 
         $this->cancelNow();
+
+        if ($callback !== null) {
+            $callback($options);
+        }
 
         return $this->user->newSubscription($this->name, $plan->id)
                             ->skipTrial()->create(null, [], $options);
@@ -272,7 +282,7 @@ class Subscription extends Model
         $amount = 0;
         foreach ($this->asBraintreeSubscription()->discounts as $discount) {
             if ($discount->id == 'plan-credit') {
-                $amount += (float) $this->moneyRemainingOnMonthlyPlan($currentPlan) * (1 + $this->user->taxPercentage());
+                $amount += (float) $this->moneyRemainingOnMonthlyPlan($currentPlan) * (1 + ($this->user->taxPercentage() / 100));
             }
         }
 
